@@ -15,7 +15,7 @@ class LogAnalyzer:
             CREATE OR REPLACE TEMP VIEW parsed_logs AS
             SELECT
                 column0 AS ip,
-                regexp_extract(column3, '[0-9].+$') AS date_time,
+                strptime(regexp_replace(column3, ' \\+\\d{4}$', ''), '%d/%b/%Y:%H:%M:%S') AS date_time
                 regexp_extract(column5, '^[A-Z]+') AS rest_method,
                 regexp_extract(column5, '/.+ ') AS rest_path,
                 column6 AS return_status,
@@ -24,10 +24,9 @@ class LogAnalyzer:
             """)
 
     def get_top_requests(self) -> pl.DataFrame:
-        parsed_query = self.parse_log()
         return self.conn.sql("""
             SELECT * EXCLUDE(date_time,bytes), COUNT(*) AS count
-            FROM parsed_query
+            FROM parsed_logs
             GROUP BY ALL
             ORDER BY count DESC
             LIMIT 10
@@ -42,7 +41,7 @@ class JsonLogAnalyzer:
             CREATE OR REPLACE TEMP VIEW parsed_logs AS
             SELECT
                 remote_ip AS ip,
-                time AS date_time,
+                strptime(time, '%d/%b/%Y:%H:%M:%S %z') AS date_time,
                 regexp_extract(request, '^[A-Z]+') AS rest_method,
                 regexp_extract(request, '/.+ ') AS rest_path,
                 response AS return_status,
@@ -52,7 +51,8 @@ class JsonLogAnalyzer:
 
     def get_daily_info(self) -> pl.DataFrame:
         return self.conn.sql("""
-            SELECT date_time, COUNT(*) AS total_requests,
+            SELECT DATE(date_time) AS date,
+            COUNT(*) AS total_requests,
             COUNT(DISTINCT ip) AS unique_ips,
             COUNT(DISTINCT rest_path) AS unique_paths,
             SUM(bytes) AS total_bytes
@@ -149,9 +149,17 @@ def frontend():
                 st.dataframe(top_errors_by_rest_path)
                 st.write("Daily Info:")
                 daily_info = log_analyzer.get_daily_info()
-                st.dataframe(daily_info)
+                st.write("Daily Info")
+                fig = px.line(
+                    daily_info,
+                    x="date",
+                    y=["total_requests", "unique_ips"],
+                    title="Daily Traffic Trend",
+                    labels={"date": "Date", "total_requests": "Total Requests"},
+                    markers=True,  # Adds distinct dots to each day's data point
+                )
+                st.plotly_chart(fig, width="stretch")
 
-                st.subheader("Bar Chart")
                 st.write("Top Errors by IP")
                 fig = px.bar(
                     top_errors_by_ip,
@@ -159,7 +167,7 @@ def frontend():
                     y="count",
                     labels={"ip": "IP Address", "count": "Error Count"},
                 )
-                st.plotly_chart(fig, width=True)
+                st.plotly_chart(fig, width="stretch")
             case _:
                 st.write("Unsupported file format")
 
