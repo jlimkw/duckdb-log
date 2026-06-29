@@ -1,5 +1,4 @@
 import os
-from sre_parse import parse
 
 import duckdb
 import plotly.express as px
@@ -80,7 +79,7 @@ class JsonLogAnalyzer:
             WHERE return_status >= 400 AND return_status < 600
             GROUP BY ALL
             ORDER BY count DESC
-            LIMIT 5
+            LIMIT 10
             """).pl()
 
     def get_top_errors_by_rest_path(self) -> pl.DataFrame:
@@ -114,6 +113,22 @@ def frontend():
                 st.dataframe(top_10_requests)
             case ".jsonl":
                 log_analyzer = JsonLogAnalyzer(file_path)
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    if total := log_analyzer.conn.sql(
+                        f"SELECT count(*) FROM '{file_path}'"
+                    ).fetchone():
+                        st.metric("Total Requests", f"{total[0]}")
+                with col2:
+                    if errors := log_analyzer.conn.sql(
+                        f"SELECT count(*) FROM '{file_path}' WHERE response >= 400 AND response < 600"
+                    ).fetchone():
+                        st.metric("Errors", f"{errors[0]}")
+                with col3:
+                    if ip_count := log_analyzer.conn.sql(
+                        f"SELECT count(distinct remote_ip) FROM '{file_path}'"
+                    ).fetchone():
+                        st.metric("IP Count", f"{ip_count[0]}")
                 top_10_requests = log_analyzer.get_top_requests()
                 st.write("Top 10 Requests:")
                 st.dataframe(top_10_requests)
@@ -128,8 +143,13 @@ def frontend():
                 st.dataframe(top_errors_by_rest_path)
 
                 st.subheader("Bar Chart")
-                st.write("**Option 1: Plotly (ordered)**")
-                fig = px.bar(top_errors_by_ip, x="ip", y="count")
+                st.write("Top Errors by IP")
+                fig = px.bar(
+                    top_errors_by_ip,
+                    x="ip",
+                    y="count",
+                    labels={"ip": "IP Address", "count": "Error Count"},
+                )
                 st.plotly_chart(fig, use_container_width=True)
             case _:
                 st.write("Unsupported file format")
